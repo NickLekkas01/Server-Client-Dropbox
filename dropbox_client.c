@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
@@ -31,8 +32,8 @@ typedef struct pool_data
 {
   uint32_t IP;
   uint32_t port;
-  char path[50];
-  char version[50];
+  char path[128];
+  time_t version;
 }Pool_data;
 
 typedef struct 
@@ -43,20 +44,18 @@ typedef struct
   int count;
 } pool_t;
 
-int num_of_items = 15;
+
 pthread_mutex_t mtx;
 pthread_cond_t cond_nonempty;
 pthread_cond_t cond_nonfull;
 pool_t pool;
 
-char *get_time()
+time_t get_version(char* path)
 {
-  time_t rawtime;
-  struct tm * timeinfo;
+  struct stat stats;
+  stat(path,&stats);
 
-  time ( &rawtime );
-  timeinfo = localtime ( &rawtime );
-  return asctime (timeinfo); 
+  return  stats.st_mtime;
 }
 
 void initialize(pool_t * pool) 
@@ -66,7 +65,7 @@ void initialize(pool_t * pool)
   pool->count = 0;
 }
 
-void place(pool_t * pool, uint32_t IP, uint32_t port, char *version, char *path) 
+void place(pool_t * pool, uint32_t IP, uint32_t port, time_t version, char *path) 
 {
   pthread_mutex_lock(&mtx);
   while (pool->count >= POOL_SIZE) 
@@ -77,7 +76,7 @@ void place(pool_t * pool, uint32_t IP, uint32_t port, char *version, char *path)
   pool->end = (pool->end + 1) % POOL_SIZE;
   pool->data[pool->end].IP = IP;
   pool->data[pool->end].port = port;
-  strcpy(pool->data[pool->end].version, version);
+  pool->data[pool->end].version =  version;
   strcpy(pool->data[pool->end].path, path);
   pool->count++;
   pthread_mutex_unlock(&mtx);
@@ -96,19 +95,19 @@ Pool_data *obtain(pool_t * pool)
   data->IP = pool->data[pool->start].IP;
   data->port = pool->data[pool->start].port;
   strcpy(data->path, pool->data[pool->start].path);
-  strcpy(data->version, pool->data[pool->start].version);
+  data->version = pool->data[pool->start].version;
   pool->start = (pool->start + 1) % POOL_SIZE;
   pool->count--;
   pthread_mutex_unlock(&mtx);
   return data;
 }
 
-void * producer(void * ptr) 
+void fill_pool() 
 {
   //CHECK HERE I HAVE THE CURRENT TIME AND CURRENT PATH.
   // DON"T KNOW IF WE WANT THEM
   Client_data *temp = start;
-  char path[1024];
+  char path[128];
   getcwd(path, sizeof(path));
   while (temp != NULL) 
   {
@@ -118,10 +117,9 @@ void * producer(void * ptr)
     pthread_cond_signal(&cond_nonempty);
     usleep(300000);
   }
-  pthread_exit(0);
 }
 
-void * consumer(void * ptr) 
+void* worker_Thread(void* ptr) 
 {
   Pool_data *data;
   Client_data *temp = start;
@@ -137,7 +135,6 @@ void * consumer(void * ptr)
     pthread_cond_signal(&cond_nonfull);
     usleep(500000);
   }
-  pthread_exit(0);
 }
 
 void write_to_server (int filedes, char *msg)
@@ -428,14 +425,14 @@ int main (void)
   pthread_cond_init(&cond_nonempty, 0);
   pthread_cond_init(&cond_nonfull, 0);
   
-  pthread_create(&cons, 0, consumer, 0);
-  pthread_create(&prod, 0, producer, 0);
-
   
   while(1)
   {
     read_from_server(sock, myIP);
   }
+
+
+
   pthread_cond_destroy(&cond_nonempty);
   pthread_cond_destroy(&cond_nonfull);
   pthread_mutex_destroy(&mtx);
