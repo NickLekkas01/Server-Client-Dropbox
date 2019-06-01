@@ -12,6 +12,8 @@
 #include <arpa/inet.h>
 #include <inttypes.h>
 #include <pthread.h>
+#include <dirent.h>
+#include <string.h>
 #include "header.h"
 
 
@@ -349,6 +351,68 @@ int read_from_server(int filedes, uint32_t myIP)
   return 0;
 }
 
+int read_from_client (int filedes, struct sockaddr_in clientname, int sock)
+{
+    char buffer[MAXMSG];
+    strcpy(buffer, "");
+    int nbytes;
+    char c[2];
+    nbytes = read(filedes, c, 1);
+    while(c[0] != ' ')
+    {
+        if (nbytes < 0)
+        {
+            /* Read error. */
+            perror ("read");
+            exit (EXIT_FAILURE);
+        }
+        else if (nbytes == 0)
+            /* End-of-file. */
+            return -1;
+        else
+        {
+            c[1]='\0';
+            strcat(buffer, c);
+            nbytes = read(filedes, c, 1);
+        }    
+    }
+    nbytes = read(filedes, c, 1);
+
+    
+    if(strcmp(buffer, "GET_FILE_LIST") == 0)
+    {
+        int counter;
+
+        counter =
+
+    }
+
+}
+
+int file_count(char* path){
+    struct dirent* directory;
+    DIR* dirptr;
+    int counter;
+    dirptr = opendir(path);
+    char filePath[128];
+
+    while((directory = readdir(dirptr)) != NULL){
+      if ( directory->d_name[0] == '.' && directory->d_name[1] == '.')
+        continue;
+
+        strcpy(filePath,path,strlen(path));
+        strcpy(filePath + strlen(path),"/", 1 );
+        strcpy(filePath + strelen(path) + 1 , directory->d_name, strlen(directory->d_name) + 1);
+
+
+    }
+
+    closedir(dirptr);
+    return counter;
+
+}
+
+
 
 void init_sockaddr (struct sockaddr_in *name,
                const char *hostname,
@@ -473,8 +537,8 @@ int main (void)
   //                           (struct sockaddr *) &servername,
   //                           (socklen_t *)&size);
   //               if (new < 0)
-  //               {
-  //                   perror ("accept");
+  //               {pthread_cond_signal(&cond_nonempty);
+  //                pthread_cond_signal(&cond_nonempty);
   //                   exit (EXIT_FAILURE);
   //               }
   //               fprintf (stderr,
@@ -499,3 +563,5 @@ int main (void)
 
   exit (EXIT_SUCCESS);
 }
+
+
