@@ -20,7 +20,7 @@
 // #define PORT            5555
 #define MESSAGE         "LOG_ON "
 #define MESSAGE2        "GET_CLIENTS "
-#define SERVERHOST      "linux21.di.uoa.gr"
+// #define SERVERHOST      "linux21.di.uoa.gr"
 
 uint32_t myIP;
 uint32_t client_port;
@@ -383,7 +383,7 @@ int main (int argc, char *argv[])
   size_t size;
   char dirName[40];
   int workerThreads;
-  char serverIP[50];
+  char SERVERHOST[50];
   if(argv[1][1] == 'd')
     strcpy(dirName, argv[2]);
   if(argv[3][1] == 'p')
@@ -395,7 +395,7 @@ int main (int argc, char *argv[])
   if(argv[9][1] == 's' && argv[9][2] == 'p')
     PORT = atoi(argv[10]);
   if(argv[11][1] == 's' && argv[11][2] == 'i' && argv[11][3] == 'p')
-    strcpy(serverIP, argv[12]);
+    strcpy(SERVERHOST, argv[12]);
 
   pthread_t threads[10];
 
