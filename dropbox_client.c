@@ -15,9 +15,9 @@
 #include "header.h"
 
 
-#define POOL_SIZE 6
+// #define POOL_SIZE 6
 
-#define PORT            5555
+// #define PORT            5555
 #define MESSAGE         "LOG_ON "
 #define MESSAGE2        "GET_CLIENTS "
 #define SERVERHOST      "linux21.di.uoa.gr"
@@ -25,6 +25,9 @@
 uint32_t myIP;
 uint32_t client_port;
 int sock;
+
+int POOL_SIZE;
+int PORT;
 
 Client_data *start = NULL;
 
@@ -38,7 +41,7 @@ typedef struct pool_data
 
 typedef struct 
 {
-  Pool_data data[POOL_SIZE];
+  Pool_data *data;
   int start;
   int end;
   int count;
@@ -60,6 +63,7 @@ time_t get_version(char* path)
 
 void initialize(pool_t * pool) 
 {
+  pool->data = malloc(POOL_SIZE * sizeof(Pool_data));
   pool->start = 0;
   pool->end = -1;
   pool->count = 0;
@@ -70,7 +74,7 @@ void place(pool_t * pool, uint32_t IP, uint32_t port, time_t version, char *path
   pthread_mutex_lock(&mtx);
   while (pool->count >= POOL_SIZE) 
   {
-    printf(">> Found Buffer Full \n");
+    //printf(">> Found Buffer Full \n");
     pthread_cond_wait(&cond_nonfull, &mtx);
   }
   pool->end = (pool->end + 1) % POOL_SIZE;
@@ -104,14 +108,12 @@ Pool_data *obtain(pool_t * pool)
 
 void fill_pool() 
 {
-  //CHECK HERE I HAVE THE CURRENT TIME AND CURRENT PATH.
-  // DON"T KNOW IF WE WANT THEM
   Client_data *temp = start;
   char path[128];
   getcwd(path, sizeof(path));
   while (temp != NULL) 
   {
-    place(&pool, temp->data->sin_addr.s_addr, temp->data->sin_port, "", "\0");
+    place(&pool, temp->data->sin_addr.s_addr, temp->data->sin_port, 0, "\0");
     printf("producer: %s %u\n", inet_ntoa(temp->data->sin_addr), temp->data->sin_port);
     temp = temp->next;
     pthread_cond_signal(&cond_nonempty);
@@ -125,13 +127,12 @@ void* worker_Thread(void* ptr)
   Client_data *temp = start;
   struct in_addr a;
   char ip[50];
-  while (temp != NULL || pool.count > 0) 
+  while (1) 
   {
     data = obtain(&pool);
     a.s_addr = data->IP;
     strcpy(ip, inet_ntoa(a));  
     printf("consumer: %s %d\n", ip, data->port);
-    temp = temp->next;
     pthread_cond_signal(&cond_nonfull);
     usleep(500000);
   }
@@ -172,7 +173,6 @@ void write_to_server (int filedes, char *msg)
     exit (EXIT_FAILURE);
   }
   
-  scanf("%" SCNd32, &client_port);
   
   temp = ntohl(client_port);
   nbytes = write(filedes, &temp, sizeof(temp));
@@ -305,7 +305,9 @@ int read_from_server(int filedes, uint32_t myIP)
       {
         a.s_addr = IP;
         if(strcmp(inet_ntoa(a), myIPbuffer) != 0 && client_port != port)
+        {
           Insert_Node(&start, IP, port, filedes);
+        }
       }
     }
     printf("Client List\n");
@@ -332,7 +334,11 @@ int read_from_server(int filedes, uint32_t myIP)
     {
       printf("%s - %s - %u\n",buffer, inet_ntoa(a), port);
       if(Node_Exists(start, IP, port, filedes) == 0)
+      {
         Insert_Node(&start, IP, port, filedes);
+        place(&pool, IP, port, 0, "\0");
+        pthread_cond_signal(&cond_nonempty);
+      }
     }
     else if(strcmp(buffer,"USER_OFF") == 0)
     {
@@ -367,7 +373,7 @@ void init_sockaddr (struct sockaddr_in *name,
   name->sin_addr = *(struct in_addr *) hostinfo->h_addr;
 }
 
-int main (void)
+int main (int argc, char *argv[])
 {
   extern void init_sockaddr (struct sockaddr_in *name,
                              const char *hostname,
@@ -375,6 +381,24 @@ int main (void)
   struct sockaddr_in servername;
   fd_set active_fd_set, read_fd_set;
   size_t size;
+  char dirName[40];
+  int workerThreads;
+  char serverIP[50];
+  if(argv[1][1] == 'd')
+    strcpy(dirName, argv[2]);
+  if(argv[3][1] == 'p')
+    client_port = atoi(argv[4]);
+  if(argv[5][1] == 'w')
+    workerThreads = atoi(argv[6]);
+  if(argv[7][1] == 'b')
+    POOL_SIZE = atoi(argv[8]);
+  if(argv[9][1] == 's' && argv[9][2] == 'p')
+    PORT = atoi(argv[10]);
+  if(argv[11][1] == 's' && argv[11][2] == 'i' && argv[11][3] == 'p')
+    strcpy(serverIP, argv[12]);
+
+  pthread_t threads[10];
+
   handler();
   /* Create the socket. */
   sock = socket (PF_INET, SOCK_STREAM, 0);
@@ -417,15 +441,19 @@ int main (void)
   write_to_server (sock,msg);
   strcpy(msg, "GET_CLIENTS ");
   write_to_server (sock,msg);
-  read_from_server(sock, myIP);
-  pthread_t cons, prod;
-
+  
   initialize(&pool);
   pthread_mutex_init(&mtx, 0);
   pthread_cond_init(&cond_nonempty, 0);
   pthread_cond_init(&cond_nonfull, 0);
   
+  read_from_server(sock, myIP);
+  fill_pool();
+  pthread_t cons, prod;
+
   
+  for(int i = 0 ; i < workerThreads; i++)
+    pthread_create(&threads[i], NULL, worker_Thread, NULL);
   while(1)
   {
     read_from_server(sock, myIP);
