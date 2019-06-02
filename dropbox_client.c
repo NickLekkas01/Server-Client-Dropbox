@@ -547,7 +547,7 @@ int main (int argc, char *argv[])
       workerThreads = atoi(argv[i+1]);
     if(argv[i][1] == 'b')
       POOL_SIZE = atoi(argv[i+1]);
-    if(argv[i][1] == 's' && )
+    if(argv[i][1] == 's')
       if(argv[i][2] == 'p')
         PORT = atoi(argv[i+1]);
       else
