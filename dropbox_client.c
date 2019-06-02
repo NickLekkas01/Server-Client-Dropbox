@@ -537,6 +537,10 @@ int main (int argc, char *argv[])
   int workerThreads;
   char SERVERHOST[50];
   if(argc != 13)
+  {
+    printf("Wrong number of arguments\n")
+    exit(-1);
+  }
   for(int i = 1; i < 12; i+=2)
   {
     if(argv[i][1] == 'd')
