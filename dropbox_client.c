@@ -15,6 +15,7 @@
 #include <dirent.h>
 #include <string.h>
 #include "header.h"
+#include <fcntl.h>
 
 
 // #define POOL_SIZE 6
@@ -55,6 +56,25 @@ pthread_mutex_t mtx;
 pthread_cond_t cond_nonempty;
 pthread_cond_t cond_nonfull;
 pool_t pool;
+
+
+void init_sockaddr (struct sockaddr_in *name,
+               const char *hostname,
+               uint16_t port)
+{
+  struct hostent *hostinfo;
+
+  name->sin_family = AF_INET;
+  name->sin_port = htons (port);
+  hostinfo = gethostbyname (hostname);
+  if (hostinfo == NULL)
+  {
+    fprintf (stderr, "Unknown host %s.\n", hostname);
+    exit (EXIT_FAILURE);
+  }
+  name->sin_addr = *(struct in_addr *) hostinfo->h_addr;
+}
+
 
 time_t get_version(char* path)
 {
@@ -140,9 +160,8 @@ void ask_file_list(int sock,struct in_addr* address,uint32_t port)
 
   while(files > 0 )
   {
-    
     while(read(sock,message,128 +sizeof(uint64_t))<= 0){}
-    
+    printf("RECEIVER: %s\n",message); 
     memcpy(&version,message+128,sizeof(uint64_t));
     place(&pool,address->s_addr,port,version,message);
     pthread_cond_signal(&cond_nonempty);
@@ -159,7 +178,9 @@ void* worker_Thread(void* ptr)
   struct in_addr a;
   int sock;
   char ip[50];
-
+  int client_sock;
+  int reuse_addr = 1;
+  setsockopt(client_sock, SOL_SOCKET, SO_REUSEADDR, &reuse_addr, sizeof(reuse_addr));
   while (1) 
   {
     data = obtain(&pool);
@@ -170,8 +191,24 @@ void* worker_Thread(void* ptr)
     if(data->path[0] == '\0'){
     printf("Asking File List From Client: %s %d\n", ip, data->port);
     //FIX prepei na ginei to connection me ton client edo kai to socket pou tha epistrafei na dothei stin sinartisi apo kato
-
-    ask_file_list(sock,&a,data->port);
+    
+    client_sock = socket (PF_INET, SOCK_STREAM, 0);
+    if (client_sock < 0)
+    {
+      perror ("socket (client)");
+      exit (EXIT_FAILURE);
+    }
+    struct sockaddr_in clientname;
+    /* Connect to the server. */
+    init_sockaddr (&clientname, ip, data->port);
+    if (0 > connect (client_sock,
+                    (struct sockaddr *) &clientname,
+                    sizeof (clientname)))
+    {
+      perror ("connect (client)");
+      exit (EXIT_FAILURE);
+    }
+    ask_file_list(client_sock,&a,data->port);
 
     }
 
@@ -223,6 +260,8 @@ void write_to_server (int filedes, char *msg)
     exit (EXIT_FAILURE);
   }
 }
+
+
 
 
 
@@ -400,19 +439,22 @@ int file_count(char* path)
 {
     struct dirent* directory;
     DIR* dirptr;
-    int counter;
+    int counter = 0;
     dirptr = opendir(path);
     char filePath[128];
 
     while((directory = readdir(dirptr)) != NULL){
-      if ( directory->d_name[0] == '.' && directory->d_name[1] == '.')
+      if ( directory->d_name[0] == '.')// && directory->d_name[1] == '.')
         continue;
 
         memcpy(filePath,path,strlen(path));
         memcpy(filePath + strlen(path),"/", 1 );
         memcpy(filePath + strlen(path) + 1 , directory->d_name, strlen(directory->d_name) + 1);
 
-        if(opendir(filePath)!=NULL){
+        DIR* tempPtr;
+        printf("%s\n", filePath);
+        if(( tempPtr = opendir(filePath))!=NULL){
+          closedir(tempPtr);
           counter += file_count(filePath);
           continue;
         }
@@ -425,7 +467,7 @@ int file_count(char* path)
 
 }
 
-int read_from_client (int filedes, struct sockaddr_in clientname, int sock)
+int read_from_client (int filedes)
 {
     char buffer[256];
     strcpy(buffer, "");
@@ -457,8 +499,10 @@ int read_from_client (int filedes, struct sockaddr_in clientname, int sock)
     {
         int counter;
         char message[256];
+        printf("skata %s\n",dirName);
         
         counter = file_count(dirName);
+        printf("skata %d\n", counter);
 
         sprintf(message,"FILE_LIST ");
         memcpy(message + 11,&counter,sizeof(int));
@@ -504,27 +548,6 @@ void send_file_paths(int filedes, char* path){
 }
 
 
-
-
-
-void init_sockaddr (struct sockaddr_in *name,
-               const char *hostname,
-               uint16_t port)
-{
-  struct hostent *hostinfo;
-
-  name->sin_family = AF_INET;
-  name->sin_port = htons (port);
-  hostinfo = gethostbyname (hostname);
-  if (hostinfo == NULL)
-  {
-    fprintf (stderr, "Unknown host %s.\n", hostname);
-    exit (EXIT_FAILURE);
-  }
-  name->sin_addr = *(struct in_addr *) hostinfo->h_addr;
-}
-
-
 int main (int argc, char *argv[])
 {
   extern void init_sockaddr (struct sockaddr_in *name,
@@ -538,7 +561,7 @@ int main (int argc, char *argv[])
   char SERVERHOST[50];
   if(argc != 13)
   {
-    printf("Wrong number of arguments\n")
+    printf("Wrong number of arguments\n");
     exit(-1);
   }
   for(int i = 1; i < 12; i+=2)
@@ -598,6 +621,27 @@ int main (int argc, char *argv[])
   inet_aton( IPbuffer, &IP);
   myIP = IP.s_addr;
 
+  struct sockaddr_in listeningClient;
+  struct sockaddr* listeningClientptr = (struct sockaddr*) &listeningClient;
+  int listeningClientLen = sizeof(listeningClient);
+
+  int listeningSock = socket(AF_INET, SOCK_STREAM, 0);
+  int reuse_addr = 1;
+  setsockopt(listeningSock, SOL_SOCKET, SO_REUSEADDR, &reuse_addr, sizeof(reuse_addr));
+  fcntl(listeningSock, F_SETFL, O_NONBLOCK);
+
+  listeningClient.sin_family = AF_INET;
+  listeningClient.sin_addr.s_addr = htonl(INADDR_ANY);
+  listeningClient.sin_port = htons((in_port_t)client_port);
+
+  if ( bind(listeningSock, listeningClientptr, listeningClientLen) != 0 ) 
+  {
+      printf("Bind Failed\n");
+      exit(1);
+  }
+
+  listen(listeningSock, 10);
+
   /* Send data to the server. */
   char msg[20];
   strcpy(msg, "LOG_ON ");
@@ -617,76 +661,80 @@ int main (int argc, char *argv[])
   
   for(int i = 0 ; i < workerThreads; i++)
     pthread_create(&threads[i], NULL, worker_Thread, NULL);
-  while(1)
+  // while(1)
+  // {
+  //   read_from_server(sock, myIP);
+  // }
+
+
+
+  
+
+  /* Initialize the set of active sockets. */
+  FD_ZERO (&active_fd_set);
+  FD_SET (sock, &active_fd_set);
+  FD_SET (listeningSock, &active_fd_set);
+
+  while (1)
   {
-    read_from_server(sock, myIP);
+    /* Block until input arrives on one or more active sockets. */
+    read_fd_set = active_fd_set;
+    if (select (FD_SETSIZE, &read_fd_set, NULL, NULL, NULL) < 0)
+    {
+    perror ("select");
+    exit (EXIT_FAILURE);
+    }
+
+    /* Service all the sockets with input pending. */
+    for (int i = 0; i < FD_SETSIZE; ++i)
+    {
+        if (FD_ISSET (i, &read_fd_set))
+        {
+            if (i == listeningSock)
+            {
+                printf("ELAVA SUNDESI 1\n");
+                /* Connection request on original socket. */
+                int new;
+                size = sizeof (listeningClient);
+                new = accept (listeningSock,
+                            (struct sockaddr *) &listeningClient,
+                            (socklen_t *)&size);
+                if (new < 0)
+                {pthread_cond_signal(&cond_nonempty);
+                 pthread_cond_signal(&cond_nonempty);
+                    exit (EXIT_FAILURE);
+                }
+                fprintf (stderr,
+                        "Server: connect from host %s, port %hd.\n",
+                        inet_ntoa (listeningClient.sin_addr),
+                        ntohs (listeningClient.sin_port));
+                FD_SET (new, &active_fd_set);
+            }
+            else if(i == sock)
+            {
+                printf("ELAVA SUNDESI 2\n");
+                /* Data arriving on an already-connected socket. */
+                if ( read_from_server (i, myIP) < 0)
+                {
+                    close (i);
+                    FD_CLR (i, &active_fd_set);
+                }
+
+            }
+            else
+            {
+              printf("ELAVA SUNDESI 3\n");
+              read_from_client(i);
+            }
+            
+        }
+    }
   }
-
-
-
   pthread_cond_destroy(&cond_nonempty);
   pthread_cond_destroy(&cond_nonfull);
   pthread_mutex_destroy(&mtx);
   close (sock);
   
-  // sock = make_socket (client_port);
-  // if (listen (sock, 1) < 0)
-  // {
-  //   perror ("listen");
-  //   exit (EXIT_FAILURE);
-  // }
-
-  // /* Initialize the set of active sockets. */
-  // FD_ZERO (&active_fd_set);
-  // FD_SET (sock, &active_fd_set);
-
-  // while (1)
-  // {
-  //   /* Block until input arrives on one or more active sockets. */
-  //   read_fd_set = active_fd_set;
-  //   if (select (FD_SETSIZE, &read_fd_set, NULL, NULL, NULL) < 0)
-  //   {
-  //   perror ("select");
-  //   exit (EXIT_FAILURE);
-  //   }
-
-  //   /* Service all the sockets with input pending. */
-  //   for (int i = 0; i < FD_SETSIZE; ++i)
-  //   {
-  //       if (FD_ISSET (i, &read_fd_set))
-  //       {
-  //           if (i == sock)
-  //           {
-  //               /* Connection request on original socket. */
-  //               int new;
-  //               size = sizeof (servername);
-  //               new = accept (sock,
-  //                           (struct sockaddr *) &servername,
-  //                           (socklen_t *)&size);
-  //               if (new < 0)
-  //               {pthread_cond_signal(&cond_nonempty);
-  //                pthread_cond_signal(&cond_nonempty);
-  //                   exit (EXIT_FAILURE);
-  //               }
-  //               fprintf (stderr,
-  //                       "Server: connect from host %s, port %hd.\n",
-  //                       inet_ntoa (servername.sin_addr),
-  //                       ntohs (servername.sin_port));
-  //               FD_SET (new, &active_fd_set);
-  //           }
-  //           else
-  //           {
-  //               /* Data arriving on an already-connected socket. */
-  //               if ( read_from_server (i) < 0)
-  //               {
-  //                   close (i);
-  //                   FD_CLR (i, &active_fd_set);
-  //               }
-
-  //           }
-  //       }
-  //   }
-  // }
 
   exit (EXIT_SUCCESS);
 }
