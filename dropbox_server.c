@@ -65,20 +65,6 @@ int send_to_clients(uint32_t IP, uint32_t port, char *msg)
     struct sockaddr_in clientname;
     while(temp != NULL)
     {
-        // sock = socket (PF_INET, SOCK_STREAM, 0);
-        // if (sock < 0)
-        // {
-        //     perror ("socket (client)");
-        //     exit (EXIT_FAILURE);
-        // }
-        // init_sockaddr_by_IP (&clientname, &temp->data->sin_addr, temp->data->sin_port);
-        // if (0 > connect (sock,
-        // (struct sockaddr *) &clientname,
-        // sizeof (clientname)))
-        // {
-        //     perror ("connect (server)");
-        //     exit (EXIT_FAILURE);
-        //  }
         struct in_addr a, b;
         a.s_addr = IP;
         b.s_addr = temp->data->sin_addr.s_addr;
@@ -107,7 +93,6 @@ int send_to_clients(uint32_t IP, uint32_t port, char *msg)
             }
         }
         temp = temp->next;
-        // close(sock);
     }
 }
 

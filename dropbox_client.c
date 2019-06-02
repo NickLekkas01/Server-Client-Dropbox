@@ -124,7 +124,8 @@ void fill_pool()
   }
 }
 
-void ask_file_list(int sock,struct in_addr* address,uint32_t port){
+void ask_file_list(int sock,struct in_addr* address,uint32_t port)
+{
   char message[256];
   char path[128];
   int bytes;
@@ -137,14 +138,15 @@ void ask_file_list(int sock,struct in_addr* address,uint32_t port){
   memcpy(&files,message+11,sizeof(int) );
   printf("%s: %d\n",message,files);
 
-  while(files > 0 ){
+  while(files > 0 )
+  {
     
     while(read(sock,message,128 +sizeof(uint64_t))<= 0){}
     
     memcpy(&version,message+128,sizeof(uint64_t));
     place(&pool,address->s_addr,port,version,message);
     pthread_cond_signal(&cond_nonempty);
-    }
+    
     files--;
   }
 }
@@ -394,6 +396,35 @@ int read_from_server(int filedes, uint32_t myIP)
   return 0;
 }
 
+int file_count(char* path)
+{
+    struct dirent* directory;
+    DIR* dirptr;
+    int counter;
+    dirptr = opendir(path);
+    char filePath[128];
+
+    while((directory = readdir(dirptr)) != NULL){
+      if ( directory->d_name[0] == '.' && directory->d_name[1] == '.')
+        continue;
+
+        memcpy(filePath,path,strlen(path));
+        memcpy(filePath + strlen(path),"/", 1 );
+        memcpy(filePath + strlen(path) + 1 , directory->d_name, strlen(directory->d_name) + 1);
+
+        if(opendir(filePath)!=NULL){
+          counter += file_count(filePath);
+          continue;
+        }
+
+        counter++;
+    }
+
+    closedir(dirptr);
+    return counter;
+
+}
+
 int read_from_client (int filedes, struct sockaddr_in clientname, int sock)
 {
     char buffer[256];
@@ -449,10 +480,10 @@ void send_file_paths(int filedes, char* path){
   dirptr = opendir(path);
 
   while((directory = readdir(dirptr))!= NULL){
-    if(directory->d_name[0] == '.' && directory->d_name == '.')
+    if(directory->d_name[0] == '.' && directory->d_name[1] == '.')
       continue;
 
-    sprintf(filePath,"%s/%s",path,directory->d_name);
+    sprintf(filePath,"%s / %s",path, directory->d_name);
     
     if(opendir(filePath) != NULL){
       send_file_paths(filedes,path);
@@ -468,37 +499,11 @@ void send_file_paths(int filedes, char* path){
 
   }
 
-  close(dirptr);
+  closedir(dirptr);
 
 }
 
-int file_count(char* path){
-    struct dirent* directory;
-    DIR* dirptr;
-    int counter;
-    dirptr = opendir(path);
-    char filePath[128];
 
-    while((directory = readdir(dirptr)) != NULL){
-      if ( directory->d_name[0] == '.' && directory->d_name[1] == '.')
-        continue;
-
-        memcpy(filePath,path,strlen(path));
-        memcpy(filePath + strlen(path),"/", 1 );
-        memcpy(filePath + strelen(path) + 1 , directory->d_name, strlen(directory->d_name) + 1);
-
-        if(opendir(filePath)!=NULL){
-          counter += file_count(filePath);
-          continue;
-        }
-
-        counter++;
-    }
-
-    closedir(dirptr);
-    return counter;
-
-}
 
 
 
@@ -531,19 +536,26 @@ int main (int argc, char *argv[])
   
   int workerThreads;
   char SERVERHOST[50];
-  if(argv[1][1] == 'd')
-    strcpy(dirName, argv[2]);
-  if(argv[3][1] == 'p')
-    client_port = atoi(argv[4]);
-  if(argv[5][1] == 'w')
-    workerThreads = atoi(argv[6]);
-  if(argv[7][1] == 'b')
-    POOL_SIZE = atoi(argv[8]);
-  if(argv[9][1] == 's' && argv[9][2] == 'p')
-    PORT = atoi(argv[10]);
-  if(argv[11][1] == 's' && argv[11][2] == 'i' && argv[11][3] == 'p')
-    strcpy(SERVERHOST, argv[12]);
-
+  if(argc != 13)
+  for(int i = 1; i < 12; i+=2)
+  {
+    if(argv[i][1] == 'd')
+      strcpy(dirName, argv[i+1]);
+    if(argv[i][1] == 'p')
+      client_port = atoi(argv[i+1]);
+    if(argv[i][1] == 'w')
+      workerThreads = atoi(argv[i+1]);
+    if(argv[i][1] == 'b')
+      POOL_SIZE = atoi(argv[i+1]);
+    if(argv[i][1] == 's' && )
+      if(argv[i][2] == 'p')
+        PORT = atoi(argv[i+1]);
+      else
+      {
+        if(argv[i][2] == 'i' && argv[i][3] == 'p')
+          strcpy(SERVERHOST, argv[i+1]);
+      }
+  }
   pthread_t threads[10];
 
   handler();
