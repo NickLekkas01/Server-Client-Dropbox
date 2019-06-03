@@ -52,7 +52,19 @@ time_t get_version(char* path)
   return  stats.st_mtime;
 }
 
-
+ 
+/*function to get size of the file.*/
+long int findSize(const char *file_name)
+{
+    struct stat st; /*declare stat variable*/
+     
+    /*get the size using stat()*/
+     
+    if(stat(file_name,&st)==0)
+        return (st.st_size);
+    else
+        return -1;
+}
 
 void ask_file_list(int sock,struct in_addr* address,uint32_t port)
 {
@@ -80,6 +92,91 @@ void ask_file_list(int sock,struct in_addr* address,uint32_t port)
   }
 }
 
+void ask_file(int sock,char *path,time_t version, struct in_addr* address,uint32_t port)
+{
+  char message[256];
+  int bytes;
+  int files;
+  strcpy(message,"GET_FILE ");
+  write(sock,message,strlen("GET_FILE ")+1);
+  char temp_path[256];
+
+  strcpy(temp_path, path);
+  strcat(temp_path, " ");
+  write(sock, temp_path, strlen(temp_path) + 1);
+  write(sock, &version, sizeof(time_t));
+  char buffer[256];
+  char c[2];
+  strcpy(buffer, "");
+  while((bytes = read(sock, c, 1))==0);
+
+  while(c[0] != ' ')
+  {
+      if (bytes < 0)
+      {
+          /* Read error. */
+          perror ("read");
+          exit (EXIT_FAILURE);
+      }
+      else if (bytes == 0)
+      //     /* End-of-file. */
+          return ;
+      else
+      {
+          c[1]='\0';
+          strcat(buffer, c);
+          bytes = read(sock, c, 1);
+      }    
+
+  }
+  while((bytes = read(sock, c, 1))==0);
+  if (bytes < 0)
+  {
+    perror ("read");
+    exit (EXIT_FAILURE);
+  }
+
+  if(strcmp(buffer, "FILE_NOT_FOUND") == 0 || strcmp(buffer, "FILE_UP_TO_DATE") == 0)
+  {
+    printf("gamiesai1 %s\n",buffer);
+    printf("%s\n",buffer);
+  }
+  else if(strcmp(buffer, "FILE_SIZE") == 0)
+  {
+
+    time_t version2;
+    while((bytes = read(sock, &version2, sizeof(time_t)) == 0)){}
+    long int size;
+    while((bytes = read(sock, &size, sizeof(long int)) == 0)){}
+    if(access(path, F_OK) != -1)
+    {
+      remove(path);
+    }
+
+    int fd = open(path, O_WRONLY | O_CREAT);
+    for(long int i = 0; i < size; i++)
+    {
+      while((bytes = read(sock, &c[0], 1)) == 0){}
+      while((bytes = write(fd, &c[0], 1)) == 0){}
+    }
+  }
+  
+
+  // while((bytes = read(sock,message,strlen("FILE ") + 1 + sizeof(int)))<= 0){}
+  // memcpy(&files,message+strlen("FILE_LIST ") + 1,sizeof(int) );
+  // printf("%s: %d\n",message,files);
+
+  // while(files > 0 )
+  // {
+  //   while(read(sock,message,128 +sizeof(uint64_t))<= 0){}
+  //   memcpy(&version,message+128,sizeof(uint64_t));
+  //   printf("RECEIVER: %s - %ld\n",message, version); 
+  //   place(&pool,address->s_addr,port,version,message);
+  //   pthread_cond_signal(&cond_nonempty);
+    
+  //   files--;
+  // }
+}
 
 void* worker_Thread(void* ptr) 
 {
@@ -121,6 +218,11 @@ void* worker_Thread(void* ptr)
       ask_file_list(client_sock,&a,data->port);
 
     }
+    else
+    {
+      ask_file(client_sock, data->path, data->version, &a,data->port);
+    }
+    
 
     usleep(500000);
   }
@@ -406,7 +508,7 @@ int read_from_client (int filedes)
     strcpy(buffer, "");
     int nbytes;
     char c[2];
-    nbytes = read(filedes, c, 1);
+    while((nbytes = read(filedes, c, 1))==0){}
     while(c[0] != ' ')
     {
         if (nbytes < 0)
@@ -425,9 +527,8 @@ int read_from_client (int filedes)
             nbytes = read(filedes, c, 1);
         }    
     }
-    nbytes = read(filedes, c, 1);
+    while((nbytes = read(filedes, c, 1))==0){}
 
-    
     if(strcmp(buffer, "GET_FILE_LIST") == 0)
     {
         int counter;
@@ -440,6 +541,73 @@ int read_from_client (int filedes)
         write(filedes,message,strlen("FILE_LIST ") + 1 + sizeof(int));
         send_file_paths(filedes, dirName);
 
+    }
+    else if(strcmp(buffer, "GET_FILE") == 0)
+    {
+      printf("EDW MPHKA\n");
+      char message[256];
+      strcpy(buffer, "");
+      while((nbytes = read(filedes, c, 1)==0));
+      while(c[0] != ' ')
+      {
+          if (nbytes < 0)
+          {
+              /* Read error. */
+              perror ("read");
+              exit (EXIT_FAILURE);
+          }
+          else if (nbytes == 0)
+              /* End-of-file. */
+              return -1;
+          else
+          {
+              c[1]='\0';
+              strcat(buffer, c);
+              nbytes = read(filedes, c, 1);
+          }    
+      }
+      while((nbytes = read(filedes, c, 1)==0));
+
+      char path[256];
+      strcpy(path, buffer);
+      time_t version;
+      while((nbytes = read(filedes,&version,sizeof(time_t)))<= 0){}
+      if(access(path, F_OK) == -1)
+      {
+        printf("MPHKA1\n");
+        strcpy(buffer, "FILE_NOT_FOUND ");
+        write(filedes, buffer, strlen(buffer) + 1);
+      }
+      else
+      {
+        printf("MPHKA2\n");
+        if(get_version(path) == version)
+        {
+          strcpy(buffer, "FILE_UP_TO_DATE ");
+          write(filedes, buffer, strlen(buffer) + 1);          
+        }
+        else
+        {
+          sprintf(message,"FILE_SIZE ");
+          //write(filedes, path, strlen(path) + 1); 
+          time_t version2 = get_version(path);
+          memcpy(message + strlen("FILE_SIZE ") + 1,&version2, sizeof(time_t));
+          long int size = findSize(path);
+          memcpy(message + strlen("FILE_SIZE ") + 1 + sizeof(time_t),&size,sizeof(long int));
+          //write(filedes, &size, sizeof(long int));
+          int fd = open(path, O_RDONLY);
+          for(long int i = 0 ; i < size; i++)
+          {
+            while((nbytes = read(fd, &c[0], 1) == 0)){}
+            memcpy(message + strlen("FILE_SIZE ") + 1 + sizeof(time_t) + sizeof(long int) + i,&c[0],1);
+           
+          }
+          write(filedes, message, strlen("FILE_SIZE ") + sizeof(time_t) + sizeof(long int) + size + 1);
+          close(fd);
+        }
+        
+      }
+       
     }
 
 }
