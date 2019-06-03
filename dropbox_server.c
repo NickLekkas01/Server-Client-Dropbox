@@ -15,7 +15,7 @@
 #define MAXMSG  512
 
 
-Client_data *start = NULL;
+Client_data *start_server_list = NULL;
 
 
 void init_sockaddr_by_IP (struct sockaddr_in *name,
@@ -59,7 +59,7 @@ int make_socket (uint16_t port)
 
 int send_to_clients(uint32_t IP, uint32_t port, char *msg)
 {
-    Client_data *temp = start;
+    Client_data *temp = start_server_list;
     int nbytes;
     int sock;
     struct sockaddr_in clientname;
@@ -169,12 +169,12 @@ int read_from_client (int filedes, struct sockaddr_in clientname, int sock)
                 {
                     port = htonl(port);
                     fprintf (stderr, "Server: got port: `%u'\n", port);
-                    if(Node_Exists(start, IP, port, filedes) == 0)
-                        Insert_Node(&start, IP, port, filedes);
+                    if(Node_Exists(start_server_list, IP, port, filedes) == 0)
+                        Insert_Node(&start_server_list, IP, port, filedes);
                 
                 }
             }
-            Print_List(start);
+            Print_List(start_server_list);
             send_to_clients(IP, port, "USER_ON ");
         }
         return 0;
@@ -187,9 +187,9 @@ int read_from_client (int filedes, struct sockaddr_in clientname, int sock)
             perror ("write");
             exit (EXIT_FAILURE);
         }
-        int N = Count_List(start);
+        int N = Count_List(start_server_list);
         nbytes = write (filedes, &N, sizeof(int));
-        Client_data *temp = start;
+        Client_data *temp = start_server_list;
         uint32_t temp1, temp2;
         for(int i = 0; i < N; i++)
         {
@@ -204,16 +204,16 @@ int read_from_client (int filedes, struct sockaddr_in clientname, int sock)
     else if(strcmp(buffer, "LOG_OFF") == 0)
     {
         uint32_t tempIP, tempport;
-        tempIP = find_IP(start, filedes);
-        tempport = find_port(start, filedes);
+        tempIP = find_IP(start_server_list, filedes);
+        tempport = find_port(start_server_list, filedes);
         send_to_clients(tempIP, tempport, "USER_OFF ");
-        if(Delete_Node(&start, tempIP, tempport) == 0)
+        if(Delete_Node(&start_server_list, tempIP, tempport) == 0)
         {
             perror("ERROR_IP_PORT_NOT_FOUND_IN_LIST");
             exit (EXIT_FAILURE);
         }
         printf("LOG_OFF\n");
-        Print_List(start);
+        Print_List(start_server_list);
     }
 }
 

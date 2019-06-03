@@ -17,45 +17,13 @@
 #include "header.h"
 #include <fcntl.h>
 
-
 // #define POOL_SIZE 6
 
 // #define PORT            5555
 #define MESSAGE         "LOG_ON "
 #define MESSAGE2        "GET_CLIENTS "
 // #define SERVERHOST      "linux21.di.uoa.gr"
-
-uint32_t myIP;
-uint32_t client_port;
-int sock;
-
-int POOL_SIZE;
-int PORT;
-char dirName[40];
-
-Client_data *start = NULL;
-
-typedef struct pool_data
-{
-  uint32_t IP;
-  uint32_t port;
-  char path[128];
-  time_t version;
-}Pool_data;
-
-typedef struct 
-{
-  Pool_data *data;
-  int start;
-  int end;
-  int count;
-} pool_t;
-
-pthread_mutex_t list_mtx;
-pthread_mutex_t pool_mtx;
-pthread_cond_t cond_nonempty;
-pthread_cond_t cond_nonfull;
-pool_t pool;
+Client_data *start_client_list = NULL;
 
 
 void init_sockaddr (struct sockaddr_in *name,
@@ -84,65 +52,7 @@ time_t get_version(char* path)
   return  stats.st_mtime;
 }
 
-void initialize(pool_t * pool) 
-{
-  pool->data = malloc(POOL_SIZE * sizeof(Pool_data));
-  pool->start = 0;
-  pool->end = -1;
-  pool->count = 0;
-}
 
-void place(pool_t * pool, uint32_t IP, uint32_t port, time_t version, char *path) 
-{
-  pthread_mutex_lock(&pool_mtx);
-  while (pool->count >= POOL_SIZE) 
-  {
-    //printf(">> Found Buffer Full \n");
-    pthread_cond_wait(&cond_nonfull, &pool_mtx);
-  }
-  pool->end = (pool->end + 1) % POOL_SIZE;
-  pool->data[pool->end].IP = IP;
-  pool->data[pool->end].port = port;
-  pool->data[pool->end].version =  version;
-  strcpy(pool->data[pool->end].path, path);
-  pool->count++;
-  pthread_mutex_unlock(&pool_mtx);
-}
-
-Pool_data *obtain(pool_t * pool) 
-{
-  Pool_data *data;
-  data = malloc(sizeof(Pool_data));
-  pthread_mutex_lock(&pool_mtx);
-  while (pool->count <= 0) 
-  {
-    printf(">> Found Buffer Empty \n");
-    pthread_cond_wait(&cond_nonempty, &pool_mtx);
-  }
-  data->IP = pool->data[pool->start].IP;
-  data->port = pool->data[pool->start].port;
-  strcpy(data->path, pool->data[pool->start].path);
-  data->version = pool->data[pool->start].version;
-  pool->start = (pool->start + 1) % POOL_SIZE;
-  pool->count--;
-  pthread_mutex_unlock(&pool_mtx);
-  return data;
-}
-
-void fill_pool() 
-{
-  Client_data *temp = start;
-  char path[128];
-  getcwd(path, sizeof(path));
-  while (temp != NULL) 
-  {
-    place(&pool, temp->data->sin_addr.s_addr, temp->data->sin_port, 0, "\0");
-    printf("producer: %s %u\n", inet_ntoa(temp->data->sin_addr), temp->data->sin_port);
-    temp = temp->next;
-    pthread_cond_signal(&cond_nonempty);
-    usleep(300000);
-  }
-}
 
 void ask_file_list(int sock,struct in_addr* address,uint32_t port)
 {
@@ -152,10 +62,10 @@ void ask_file_list(int sock,struct in_addr* address,uint32_t port)
   int files;
   time_t version;
   strcpy(message,"GET_FILE_LIST ");
-  write(sock,message,15);
+  write(sock,message,strlen("GET_FILE_LIST ")+1);
 
-  while((bytes = read(sock,message,11 + sizeof(int)))<= 0){}
-  memcpy(&files,message+11,sizeof(int) );
+  while((bytes = read(sock,message,strlen("GET_FILE_LIST ") + 1 + sizeof(int)))<= 0){}
+  memcpy(&files,message+strlen("GET_FILE_LIST ") + 1,sizeof(int) );
   printf("%s: %d\n",message,files);
 
   while(files > 0 )
@@ -174,7 +84,7 @@ void ask_file_list(int sock,struct in_addr* address,uint32_t port)
 void* worker_Thread(void* ptr) 
 {
   Pool_data *data;
-  Client_data *temp = start;
+  Client_data *temp = start_client_list;
   struct in_addr a;
   int sock;
   char ip[50];
@@ -191,7 +101,6 @@ void* worker_Thread(void* ptr)
     if(data->path[0] == '\0')
     {
       printf("Asking File List From Client: %s %d\n", ip, data->port);
-      //FIX prepei na ginei to connection me ton client edo kai to socket pou tha epistrafei na dothei stin sinartisi apo kato
       
       client_sock = socket (PF_INET, SOCK_STREAM, 0);
       if (client_sock < 0)
@@ -269,6 +178,12 @@ void write_to_server (int filedes, char *msg)
 void signal_arrived(int signal)
 {
     write_to_server (sock,"LOG_OFF ");
+    pthread_cond_destroy(&cond_nonempty);
+    pthread_cond_destroy(&cond_nonfull);
+    pthread_mutex_destroy(&pool_mtx);
+    pthread_mutex_destroy(&list_mtx);
+    close (sock);
+    close(listeningSock);
     exit(0);
 }
 
@@ -291,32 +206,6 @@ void handler (void)
   setup_action.sa_mask = block_mask;
   sigaction (SIGINT, &setup_action, NULL);
   
-}
-
-int make_socket (uint16_t port)
-{
-    int sock;
-    struct sockaddr_in name;
-
-    /* Create the socket. */
-    sock = socket (PF_INET, SOCK_STREAM, 0);
-    if (sock < 0)
-    {
-        perror ("socket");
-        exit (EXIT_FAILURE);
-    }
-
-    /* Give the socket a name. */
-    name.sin_family = AF_INET;
-    name.sin_port = htons (port);
-    name.sin_addr.s_addr = htonl (INADDR_ANY);
-    if (bind (sock, (struct sockaddr *) &name, sizeof (name)) < 0)
-    {
-      perror ("bind");
-      exit (EXIT_FAILURE);
-    }
-
-  return sock;
 }
 
 int read_from_server(int filedes, uint32_t myIP)
@@ -383,12 +272,12 @@ int read_from_server(int filedes, uint32_t myIP)
       }
       port = htonl(port);
       pthread_mutex_lock(&list_mtx);
-      if(Node_Exists(start, IP, port, filedes) == 0)
+      if(Node_Exists(start_client_list, IP, port, filedes) == 0)
       {
         a.s_addr = IP;
         if(strcmp(inet_ntoa(a), myIPbuffer) != 0 && client_port != port)
         {
-          Insert_Node(&start, IP, port, filedes);
+          Insert_Node(&start_client_list, IP, port, filedes);
         }
       }
       pthread_mutex_unlock(&list_mtx);
@@ -418,9 +307,9 @@ int read_from_server(int filedes, uint32_t myIP)
     {
       printf("%s - %s - %u\n",buffer, inet_ntoa(a), port);
       pthread_mutex_lock(&list_mtx);
-      if(Node_Exists(start, IP, port, filedes) == 0)
+      if(Node_Exists(start_client_list, IP, port, filedes) == 0)
       {
-        Insert_Node(&start, IP, port, filedes);
+        Insert_Node(&start_client_list, IP, port, filedes);
         place(&pool, IP, port, 0, "\0");
         pthread_cond_signal(&cond_nonempty);
       }
@@ -430,7 +319,7 @@ int read_from_server(int filedes, uint32_t myIP)
     {
       printf("%s - %s - %u\n",buffer, inet_ntoa(a), port);
       pthread_mutex_lock(&list_mtx);
-      if(Delete_Node(&start, IP, port) == 0)
+      if(Delete_Node(&start_client_list, IP, port) == 0)
       {
           perror("ERROR_IP_PORT_NOT_FOUND_IN_LIST");
           exit (EXIT_FAILURE);
@@ -438,7 +327,7 @@ int read_from_server(int filedes, uint32_t myIP)
       pthread_mutex_unlock(&list_mtx);
     }
   }
-  Print_List(start); 
+  Print_List(start_client_list); 
 
   return 0;
 }
@@ -634,7 +523,7 @@ int main (int argc, char *argv[])
   struct sockaddr* listeningClientptr = (struct sockaddr*) &listeningClient;
   int listeningClientLen = sizeof(listeningClient);
 
-  int listeningSock = socket(AF_INET, SOCK_STREAM, 0);
+  listeningSock = socket(AF_INET, SOCK_STREAM, 0);
   int reuse_addr = 1;
   setsockopt(listeningSock, SOL_SOCKET, SO_REUSEADDR, &reuse_addr, sizeof(reuse_addr));
   fcntl(listeningSock, F_SETFL, O_NONBLOCK);
@@ -665,7 +554,7 @@ int main (int argc, char *argv[])
   pthread_cond_init(&cond_nonfull, 0);
   
   read_from_server(sock, myIP);
-  fill_pool();
+  fill_pool(start_client_list);
   pthread_t cons, prod;
 
   
@@ -740,10 +629,7 @@ int main (int argc, char *argv[])
         }
     }
   }
-  pthread_cond_destroy(&cond_nonempty);
-  pthread_cond_destroy(&cond_nonfull);
-  pthread_mutex_destroy(&pool_mtx);
-  close (sock);
+  
   
 
   exit (EXIT_SUCCESS);
