@@ -64,8 +64,8 @@ void ask_file_list(int sock,struct in_addr* address,uint32_t port)
   strcpy(message,"GET_FILE_LIST ");
   write(sock,message,strlen("GET_FILE_LIST ")+1);
 
-  while((bytes = read(sock,message,strlen("GET_FILE_LIST ") + 1 + sizeof(int)))<= 0){}
-  memcpy(&files,message+strlen("GET_FILE_LIST ") + 1,sizeof(int) );
+  while((bytes = read(sock,message,strlen("FILE_LIST ") + 1 + sizeof(int)))<= 0){}
+  memcpy(&files,message+strlen("FILE_LIST ") + 1,sizeof(int) );
   printf("%s: %d\n",message,files);
 
   while(files > 0 )
@@ -591,7 +591,6 @@ int main (int argc, char *argv[])
         {
             if (i == listeningSock)
             {
-                printf("ELAVA SUNDESI 1\n");
                 /* Connection request on original socket. */
                 int new;
                 size = sizeof (listeningClient);
@@ -611,7 +610,6 @@ int main (int argc, char *argv[])
             }
             else if(i == sock)
             {
-                printf("ELAVA SUNDESI 2\n");
                 /* Data arriving on an already-connected socket. */
                 if ( read_from_server (i, myIP) < 0)
                 {
@@ -622,7 +620,6 @@ int main (int argc, char *argv[])
             }
             else
             {
-              printf("ELAVA SUNDESI 3\n");
               read_from_client(i);
             }
             
