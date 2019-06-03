@@ -51,8 +51,8 @@ typedef struct
   int count;
 } pool_t;
 
-
-pthread_mutex_t mtx;
+pthread_mutex_t list_mtx;
+pthread_mutex_t pool_mtx;
 pthread_cond_t cond_nonempty;
 pthread_cond_t cond_nonfull;
 pool_t pool;
@@ -94,11 +94,11 @@ void initialize(pool_t * pool)
 
 void place(pool_t * pool, uint32_t IP, uint32_t port, time_t version, char *path) 
 {
-  pthread_mutex_lock(&mtx);
+  pthread_mutex_lock(&pool_mtx);
   while (pool->count >= POOL_SIZE) 
   {
     //printf(">> Found Buffer Full \n");
-    pthread_cond_wait(&cond_nonfull, &mtx);
+    pthread_cond_wait(&cond_nonfull, &pool_mtx);
   }
   pool->end = (pool->end + 1) % POOL_SIZE;
   pool->data[pool->end].IP = IP;
@@ -106,18 +106,18 @@ void place(pool_t * pool, uint32_t IP, uint32_t port, time_t version, char *path
   pool->data[pool->end].version =  version;
   strcpy(pool->data[pool->end].path, path);
   pool->count++;
-  pthread_mutex_unlock(&mtx);
+  pthread_mutex_unlock(&pool_mtx);
 }
 
 Pool_data *obtain(pool_t * pool) 
 {
   Pool_data *data;
   data = malloc(sizeof(Pool_data));
-  pthread_mutex_lock(&mtx);
+  pthread_mutex_lock(&pool_mtx);
   while (pool->count <= 0) 
   {
     printf(">> Found Buffer Empty \n");
-    pthread_cond_wait(&cond_nonempty, &mtx);
+    pthread_cond_wait(&cond_nonempty, &pool_mtx);
   }
   data->IP = pool->data[pool->start].IP;
   data->port = pool->data[pool->start].port;
@@ -125,7 +125,7 @@ Pool_data *obtain(pool_t * pool)
   data->version = pool->data[pool->start].version;
   pool->start = (pool->start + 1) % POOL_SIZE;
   pool->count--;
-  pthread_mutex_unlock(&mtx);
+  pthread_mutex_unlock(&pool_mtx);
   return data;
 }
 
@@ -161,8 +161,8 @@ void ask_file_list(int sock,struct in_addr* address,uint32_t port)
   while(files > 0 )
   {
     while(read(sock,message,128 +sizeof(uint64_t))<= 0){}
-    printf("RECEIVER: %s\n",message); 
     memcpy(&version,message+128,sizeof(uint64_t));
+    printf("RECEIVER: %s - %ld\n",message, version); 
     place(&pool,address->s_addr,port,version,message);
     pthread_cond_signal(&cond_nonempty);
     
@@ -188,27 +188,28 @@ void* worker_Thread(void* ptr)
     a.s_addr = data->IP;
     strcpy(ip, inet_ntoa(a));  
 
-    if(data->path[0] == '\0'){
-    printf("Asking File List From Client: %s %d\n", ip, data->port);
-    //FIX prepei na ginei to connection me ton client edo kai to socket pou tha epistrafei na dothei stin sinartisi apo kato
-    
-    client_sock = socket (PF_INET, SOCK_STREAM, 0);
-    if (client_sock < 0)
+    if(data->path[0] == '\0')
     {
-      perror ("socket (client)");
-      exit (EXIT_FAILURE);
-    }
-    struct sockaddr_in clientname;
-    /* Connect to the server. */
-    init_sockaddr (&clientname, ip, data->port);
-    if (0 > connect (client_sock,
-                    (struct sockaddr *) &clientname,
-                    sizeof (clientname)))
-    {
-      perror ("connect (client)");
-      exit (EXIT_FAILURE);
-    }
-    ask_file_list(client_sock,&a,data->port);
+      printf("Asking File List From Client: %s %d\n", ip, data->port);
+      //FIX prepei na ginei to connection me ton client edo kai to socket pou tha epistrafei na dothei stin sinartisi apo kato
+      
+      client_sock = socket (PF_INET, SOCK_STREAM, 0);
+      if (client_sock < 0)
+      {
+        perror ("socket (client)");
+        exit (EXIT_FAILURE);
+      }
+      struct sockaddr_in clientname;
+      /* Connect to the server. */
+      init_sockaddr (&clientname, ip, data->port);
+      if (0 > connect (client_sock,
+                      (struct sockaddr *) &clientname,
+                      sizeof (clientname)))
+      {
+        perror ("connect (client)");
+        exit (EXIT_FAILURE);
+      }
+      ask_file_list(client_sock,&a,data->port);
 
     }
 
@@ -381,6 +382,7 @@ int read_from_server(int filedes, uint32_t myIP)
           exit (EXIT_FAILURE);
       }
       port = htonl(port);
+      pthread_mutex_lock(&list_mtx);
       if(Node_Exists(start, IP, port, filedes) == 0)
       {
         a.s_addr = IP;
@@ -389,6 +391,8 @@ int read_from_server(int filedes, uint32_t myIP)
           Insert_Node(&start, IP, port, filedes);
         }
       }
+      pthread_mutex_unlock(&list_mtx);
+
     }
     printf("Client List\n");
   }
@@ -413,21 +417,25 @@ int read_from_server(int filedes, uint32_t myIP)
     if(strcmp(buffer,"USER_ON") == 0)
     {
       printf("%s - %s - %u\n",buffer, inet_ntoa(a), port);
+      pthread_mutex_lock(&list_mtx);
       if(Node_Exists(start, IP, port, filedes) == 0)
       {
         Insert_Node(&start, IP, port, filedes);
         place(&pool, IP, port, 0, "\0");
         pthread_cond_signal(&cond_nonempty);
       }
+      pthread_mutex_unlock(&list_mtx);
     }
     else if(strcmp(buffer,"USER_OFF") == 0)
     {
       printf("%s - %s - %u\n",buffer, inet_ntoa(a), port);
+      pthread_mutex_lock(&list_mtx);
       if(Delete_Node(&start, IP, port) == 0)
       {
           perror("ERROR_IP_PORT_NOT_FOUND_IN_LIST");
           exit (EXIT_FAILURE);
       }
+      pthread_mutex_unlock(&list_mtx);
     }
   }
   Print_List(start); 
@@ -467,6 +475,42 @@ int file_count(char* path)
 
 }
 
+void send_file_paths(int filedes, char* path){
+  char filePath[128];
+  char message[256];
+  struct dirent* directory;
+  DIR* dirptr;
+  struct stat stats;
+  
+
+  dirptr = opendir(path);
+
+  while((directory = readdir(dirptr))!= NULL){
+    if(directory->d_name[0] == '.')// && directory->d_name[1] == '.')
+      continue;
+
+    sprintf(filePath,"%s/%s",path, directory->d_name);
+    DIR *temp;
+    if((temp = opendir(filePath)) != NULL){
+      closedir(temp);
+      send_file_paths(filedes,filePath);
+      continue;
+    }
+
+    stat(filePath,&stats);
+
+    memcpy(message,filePath,128);
+    memcpy(message + 128,&stats.st_mtime,sizeof(uint64_t));
+
+    write(filedes,message,128+sizeof(uint64_t));
+
+  }
+
+  closedir(dirptr);
+
+}
+
+
 int read_from_client (int filedes)
 {
     char buffer[256];
@@ -499,53 +543,18 @@ int read_from_client (int filedes)
     {
         int counter;
         char message[256];
-        printf("skata %s\n",dirName);
         
         counter = file_count(dirName);
-        printf("skata %d\n", counter);
 
         sprintf(message,"FILE_LIST ");
-        memcpy(message + 11,&counter,sizeof(int));
-        write(filedes,message,11 + sizeof(int));
-    
+        memcpy(message + strlen("FILE_LIST ") + 1,&counter,sizeof(int));
+        write(filedes,message,strlen("FILE_LIST ") + 1 + sizeof(int));
+        send_file_paths(filedes, dirName);
 
     }
 
 }
 
-void send_file_paths(int filedes, char* path){
-  char filePath[128];
-  char message[256];
-  struct dirent* directory;
-  DIR* dirptr;
-  struct stat stats;
-  
-
-  dirptr = opendir(path);
-
-  while((directory = readdir(dirptr))!= NULL){
-    if(directory->d_name[0] == '.' && directory->d_name[1] == '.')
-      continue;
-
-    sprintf(filePath,"%s / %s",path, directory->d_name);
-    
-    if(opendir(filePath) != NULL){
-      send_file_paths(filedes,path);
-      continue;
-    }
-
-    stat(filePath,&stats);
-
-    memcpy(message,filePath,128);
-    memcpy(message + 128,&stats.st_mtime,sizeof(uint64_t));
-
-    write(filedes,message,128+sizeof(uint64_t));
-
-  }
-
-  closedir(dirptr);
-
-}
 
 
 int main (int argc, char *argv[])
@@ -650,7 +659,8 @@ int main (int argc, char *argv[])
   write_to_server (sock,msg);
   
   initialize(&pool);
-  pthread_mutex_init(&mtx, 0);
+  pthread_mutex_init(&list_mtx, 0);
+  pthread_mutex_init(&pool_mtx, 0);
   pthread_cond_init(&cond_nonempty, 0);
   pthread_cond_init(&cond_nonfull, 0);
   
@@ -732,7 +742,7 @@ int main (int argc, char *argv[])
   }
   pthread_cond_destroy(&cond_nonempty);
   pthread_cond_destroy(&cond_nonfull);
-  pthread_mutex_destroy(&mtx);
+  pthread_mutex_destroy(&pool_mtx);
   close (sock);
   
 
