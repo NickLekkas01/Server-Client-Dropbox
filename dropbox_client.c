@@ -98,13 +98,13 @@ void ask_file(int sock,char *path,time_t version, struct in_addr* address,uint32
   int bytes;
   int files;
   strcpy(message,"GET_FILE ");
-  write(sock,message,strlen("GET_FILE ")+1);
+  while ((write(sock,message,strlen("GET_FILE ")+1))==0);
   char temp_path[256];
 
   strcpy(temp_path, path);
   strcat(temp_path, " ");
-  write(sock, temp_path, strlen(temp_path) + 1);
-  write(sock, &version, sizeof(time_t));
+  while((write(sock, temp_path, strlen(temp_path) + 1))==0);
+  while((bytes = write(sock, &version, sizeof(time_t))) == 0);
   char buffer[256];
   char c[2];
   strcpy(buffer, "");
@@ -125,29 +125,28 @@ void ask_file(int sock,char *path,time_t version, struct in_addr* address,uint32
       {
           c[1]='\0';
           strcat(buffer, c);
-          bytes = read(sock, c, 1);
+          while((bytes = read(sock, c, 1))==0);
       }    
 
   }
+
   while((bytes = read(sock, c, 1))==0);
   if (bytes < 0)
   {
     perror ("read");
     exit (EXIT_FAILURE);
   }
-
   if(strcmp(buffer, "FILE_NOT_FOUND") == 0 || strcmp(buffer, "FILE_UP_TO_DATE") == 0)
   {
-    printf("gamiesai1 %s\n",buffer);
     printf("%s\n",buffer);
   }
   else if(strcmp(buffer, "FILE_SIZE") == 0)
   {
-
     time_t version2;
     while((bytes = read(sock, &version2, sizeof(time_t)) == 0)){}
     long int size;
     while((bytes = read(sock, &size, sizeof(long int)) == 0)){}
+    //printf("%ld - %ld\n",version2, size);
     if(access(path, F_OK) != -1)
     {
       remove(path);
@@ -159,6 +158,7 @@ void ask_file(int sock,char *path,time_t version, struct in_addr* address,uint32
       while((bytes = read(sock, &c[0], 1)) == 0){}
       while((bytes = write(fd, &c[0], 1)) == 0){}
     }
+    close(fd);
   }
   
 
@@ -524,11 +524,10 @@ int read_from_client (int filedes)
         {
             c[1]='\0';
             strcat(buffer, c);
-            nbytes = read(filedes, c, 1);
+            while((nbytes = read(filedes, c, 1))==0);
         }    
     }
     while((nbytes = read(filedes, c, 1))==0){}
-
     if(strcmp(buffer, "GET_FILE_LIST") == 0)
     {
         int counter;
@@ -544,7 +543,6 @@ int read_from_client (int filedes)
     }
     else if(strcmp(buffer, "GET_FILE") == 0)
     {
-      printf("EDW MPHKA\n");
       char message[256];
       strcpy(buffer, "");
       while((nbytes = read(filedes, c, 1)==0));
@@ -563,7 +561,7 @@ int read_from_client (int filedes)
           {
               c[1]='\0';
               strcat(buffer, c);
-              nbytes = read(filedes, c, 1);
+              while((nbytes = read(filedes, c, 1))==0);
           }    
       }
       while((nbytes = read(filedes, c, 1)==0));
@@ -589,20 +587,23 @@ int read_from_client (int filedes)
         else
         {
           sprintf(message,"FILE_SIZE ");
-          //write(filedes, path, strlen(path) + 1); 
+          write(filedes, message, strlen(message) + 1); 
           time_t version2 = get_version(path);
-          memcpy(message + strlen("FILE_SIZE ") + 1,&version2, sizeof(time_t));
+          // memcpy(message + strlen("FILE_SIZE ") + 1,&version2, sizeof(time_t));
+          write(filedes, &version2, sizeof(time_t));
           long int size = findSize(path);
-          memcpy(message + strlen("FILE_SIZE ") + 1 + sizeof(time_t),&size,sizeof(long int));
-          //write(filedes, &size, sizeof(long int));
+          // memcpy(message + strlen("FILE_SIZE ") + 1 + sizeof(time_t),&size,sizeof(long int));
+          write(filedes, &size, sizeof(long int));
           int fd = open(path, O_RDONLY);
+          strcpy(message, "");
           for(long int i = 0 ; i < size; i++)
           {
             while((nbytes = read(fd, &c[0], 1) == 0)){}
-            memcpy(message + strlen("FILE_SIZE ") + 1 + sizeof(time_t) + sizeof(long int) + i,&c[0],1);
-           
+            //memcpy(message + i,&c[0],1);
+            write(filedes, message + i, 1);
+
           }
-          write(filedes, message, strlen("FILE_SIZE ") + sizeof(time_t) + sizeof(long int) + size + 1);
+          //write(filedes, message, strlen("FILE_SIZE ") + sizeof(time_t) + sizeof(long int) + size + 1);
           close(fd);
         }
         
