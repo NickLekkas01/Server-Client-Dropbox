@@ -9,4 +9,4 @@ objects: list.c dropbox_server.c dropbox_client.c pool.c
 	gcc pool.c -c
 
 clean: server client pool.o dropbox_server.o dropbox_client.o
-	rm server client dropbox_server.o dropbox_client.o pool.o
+	rm server client dropbox_server.o dropbox_client.o pool.o list.o

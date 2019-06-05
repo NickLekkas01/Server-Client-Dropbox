@@ -84,7 +84,7 @@ void ask_file_list(int sock,struct in_addr* address,uint32_t port)
   {
     while(read(sock,message,128 +sizeof(uint64_t))<= 0){}
     memcpy(&version,message+128,sizeof(uint64_t));
-    printf("RECEIVER: %s - %ld\n",message, version); 
+    //printf("RECEIVER: %s - %ld\n",message, version); 
     place(&pool,address->s_addr,port,version,message);
     pthread_cond_signal(&cond_nonempty);
     
@@ -572,13 +572,11 @@ int read_from_client (int filedes)
       while((nbytes = read(filedes,&version,sizeof(time_t)))<= 0){}
       if(access(path, F_OK) == -1)
       {
-        printf("MPHKA1\n");
         strcpy(buffer, "FILE_NOT_FOUND ");
         write(filedes, buffer, strlen(buffer) + 1);
       }
       else
       {
-        printf("MPHKA2\n");
         if(get_version(path) == version)
         {
           strcpy(buffer, "FILE_UP_TO_DATE ");
