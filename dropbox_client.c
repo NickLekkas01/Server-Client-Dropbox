@@ -66,7 +66,7 @@ long int findSize(const char *file_name)
         return -1;
 }
 
-void ask_file_list(int sock,struct in_addr* address,uint32_t port)
+void ask_file_list(int client_sock,struct in_addr* address,uint32_t port)
 {
   char message[256];
   char path[128];
@@ -74,15 +74,16 @@ void ask_file_list(int sock,struct in_addr* address,uint32_t port)
   int files;
   time_t version;
   strcpy(message,"GET_FILE_LIST ");
-  write(sock,message,strlen("GET_FILE_LIST ")+1);
+  write(client_sock,message,strlen("GET_FILE_LIST ")+1);
 
-  while((bytes = read(sock,message,strlen("FILE_LIST ") + 1 + sizeof(int)))<= 0){}
+  strcpy(message, "");
+  while((bytes = read(client_sock,message,strlen("FILE_LIST ") + 1 + sizeof(int)))<= 0){}
   memcpy(&files,message+strlen("FILE_LIST ") + 1,sizeof(int) );
   printf("%s: %d\n",message,files);
 
   while(files > 0 )
   {
-    while(read(sock,message,128 +sizeof(uint64_t))<= 0){}
+    while(read(client_sock,message,128 +sizeof(uint64_t))<= 0){}
     memcpy(&version,message+128,sizeof(uint64_t));
     //printf("RECEIVER: %s - %ld\n",message, version); 
     place(&pool,address->s_addr,port,version,message);
@@ -90,29 +91,32 @@ void ask_file_list(int sock,struct in_addr* address,uint32_t port)
     
     files--;
   }
+  strcpy(message, "");
 }
 
-void ask_file(int sock,char *path,time_t version)
+void ask_file(int client_sock,char *path,time_t version)
 {
   char message[256];
   int bytes;
   int files;
+  /*Send GET_FILE*/
   strcpy(message,"GET_FILE ");
-  while ((bytes = write(sock,message,strlen("GET_FILE ")+1)) == 0 ){}
+  while ((bytes = write(client_sock,message,strlen("GET_FILE ")+1)) <= 0 ){}
   char temp_path[256];
 
+  /*Send Path with a space in the end*/
   strcpy(temp_path, path);
   strcat(temp_path, " ");
-  while((bytes = write(sock, temp_path, strlen(temp_path) + 1)) == 0){}
-  while((bytes = write(sock, &version, sizeof(time_t))) == 0){}
-  printf("SKATA\n");
+  while((bytes = write(client_sock, temp_path, strlen(temp_path) + 1)) <= 0){}
+  
+  /*Send version*/
+  while((bytes = write(client_sock, &version, sizeof(time_t))) <= 0){}
   char buffer[256];
   char c[2];
   strcpy(buffer, "");
-  printf("SKATA2\n");
-  while((bytes = read(sock, c, 1)) <= 0);
-  printf("SKATA3\n");
-
+  /*Read answer from other client*/
+  while((bytes = read(client_sock, c, 1)) <= 0);
+  /*Read until space found*/
   while(c[0] != ' ')
   {
       if (bytes < 0)
@@ -128,11 +132,12 @@ void ask_file(int sock,char *path,time_t version)
       {
           c[1]='\0';
           strcat(buffer, c);
-          while((bytes = read(sock, c, 1)) <= 0);
+          while((bytes = read(client_sock, c, 1)) <= 0);
       }    
 
   }
-  while((bytes = read(sock, c, 1))<=0);
+  /*Read the \0 character in the end*/
+  while((bytes = read(client_sock, c, 1))<=0);
   if (bytes < 0)
   {
     perror ("read");
@@ -145,21 +150,25 @@ void ask_file(int sock,char *path,time_t version)
   else if(strcmp(buffer, "FILE_SIZE") == 0)
   {
     time_t version2;
-    while((bytes = read(sock, &version2, sizeof(time_t)) == 0)){}
+    /*Read version*/
+    while((bytes = read(client_sock, &version2, sizeof(time_t)) <= 0)){}
     long int size;
-    while((bytes = read(sock, &size, sizeof(long int)) == 0)){}
+    /*Read size*/
+    while((bytes = read(client_sock, &size, sizeof(long int)) <= 0)){}
     printf("%ld - %ld\n",version2, size);
+    /*If file exists delete it*/
     if(access(path, F_OK) != -1)
     {
       remove(path);
     }
-
+    /*Create if it doesn't exist and write the data(in bytes) you got*/
     int fd = open(path, O_WRONLY | O_CREAT);
     for(long int i = 0; i < size; i++)
     {
-      while((bytes = read(sock, &c[0], 1)) == 0){}
-      while((bytes = write(fd, &c[0], 1)) == 0){}
+      while((bytes = read(client_sock, &c[0], 1)) <= 0){}
+      while((bytes = write(fd, &c[0], 1)) <= 0){}
     }
+    printf("Created the file\n");
     close(fd);
   }
 }
@@ -169,7 +178,6 @@ void* worker_Thread(void* ptr)
   Pool_data *data;
   Client_data *temp = start_client_list;
   struct in_addr a;
-  int sock;
   char ip[50];
   int client_sock;
   int reuse_addr = 1;
@@ -180,7 +188,7 @@ void* worker_Thread(void* ptr)
     pthread_cond_signal(&cond_nonfull);
     a.s_addr = data->IP;
     strcpy(ip, inet_ntoa(a));  
-
+    /*If it is empty*/
     if(data->path[0] == '\0')
     {
       printf("Asking File List From Client: %s %d\n", ip, data->port);
@@ -191,8 +199,12 @@ void* worker_Thread(void* ptr)
         perror ("socket (client)");
         exit (EXIT_FAILURE);
       }
+      fcntl(client_sock, 0, O_NONBLOCK);
+      int reuse_addr = 1;
+      setsockopt(client_sock, SOL_SOCKET, SO_REUSEADDR, &reuse_addr, sizeof(reuse_addr));
+
       struct sockaddr_in clientname;
-      /* Connect to the server. */
+      /* Connect to the client. */
       init_sockaddr (&clientname, ip, data->port);
       if (0 > connect (client_sock,
                       (struct sockaddr *) &clientname,
@@ -201,10 +213,12 @@ void* worker_Thread(void* ptr)
         perror ("connect (client)");
         exit (EXIT_FAILURE);
       }
+      /*Get File list*/
       ask_file_list(client_sock,&a,data->port);
     }
     else
     {
+      /*Get file*/
       ask_file(client_sock, data->path, data->version);
     }
     
@@ -225,6 +239,8 @@ void write_to_server (int filedes, char *msg)
   }
   if(strcmp(msg, "GET_CLIENTS ") == 0 || strcmp(msg, "LOG_OFF ") == 0)
     return;
+
+  /*Get IP by host*/
   struct hostent *hostinfo;
   char hostname[1024];
   hostname[1023] = '\0';
@@ -240,7 +256,9 @@ void write_to_server (int filedes, char *msg)
   IPbuffer = inet_ntoa(*((struct in_addr*) 
                           hostinfo->h_addr_list[0])); 
   inet_aton( IPbuffer, &IP);
+  
   uint32_t temp = ntohl(IP.s_addr);
+  /*Send IP*/
   nbytes = write(filedes, &temp, sizeof(temp));
   if (nbytes < 0)
   {
@@ -250,6 +268,7 @@ void write_to_server (int filedes, char *msg)
   
   
   temp = ntohl(client_port);
+  /*Send port*/
   nbytes = write(filedes, &temp, sizeof(temp));
   if (nbytes < 0)
   {
@@ -264,12 +283,12 @@ void write_to_server (int filedes, char *msg)
 
 void signal_arrived(int signal)
 {
-    write_to_server (sock,"LOG_OFF ");
+    write_to_server (server_sock,"LOG_OFF ");
     pthread_cond_destroy(&cond_nonempty);
     pthread_cond_destroy(&cond_nonfull);
     pthread_mutex_destroy(&pool_mtx);
     pthread_mutex_destroy(&list_mtx);
-    close (sock);
+    close (server_sock);
     close(listeningSock);
     exit(0);
 }
@@ -376,6 +395,7 @@ int read_from_server(int filedes, uint32_t myIP)
   }
   else if(strcmp(buffer,"USER_ON") == 0 || strcmp(buffer,"USER_OFF") == 0)
   {
+    /*Read IP*/
     while((nbytes = read(filedes, &IP, sizeof(IP))<=0));
     if (nbytes < 0)
     {
@@ -383,6 +403,7 @@ int read_from_server(int filedes, uint32_t myIP)
       exit (EXIT_FAILURE);
     }
     IP = htonl(IP);
+    /*Read port*/
     while((nbytes = read(filedes, &port, sizeof(port))<=0));
     if (nbytes < 0)
     {
@@ -396,6 +417,7 @@ int read_from_server(int filedes, uint32_t myIP)
     {
       printf("%s - %s - %u\n",buffer, inet_ntoa(a), port);
       pthread_mutex_lock(&list_mtx);
+      /*Insert new client in clients list*/
       if(Node_Exists(start_client_list, IP, port, filedes) == 0)
       {
         Insert_Node(&start_client_list, IP, port, filedes);
@@ -408,6 +430,7 @@ int read_from_server(int filedes, uint32_t myIP)
     {
       printf("%s - %s - %u\n",buffer, inet_ntoa(a), port);
       pthread_mutex_lock(&list_mtx);
+      /*Delete client from clients list*/
       if(Delete_Node(&start_client_list, IP, port) == 0)
       {
           perror("ERROR_IP_PORT_NOT_FOUND_IN_LIST");
@@ -418,6 +441,7 @@ int read_from_server(int filedes, uint32_t myIP)
     strcpy(buffer, "");
     
   }
+  /*Print clients list*/
   Print_List(start_client_list); 
 
   return 0;
@@ -432,6 +456,7 @@ int file_count(char* path)
     char filePath[128];
 
     while((directory = readdir(dirptr)) != NULL){
+      /*Ignore secret files*/
       if ( directory->d_name[0] == '.')// && directory->d_name[1] == '.')
         continue;
 
@@ -497,6 +522,7 @@ int read_from_client (int filedes)
     strcpy(buffer, "");
     int nbytes;
     char c[2];
+    /*Read GET_FILE_LIST OR GET_FILE*/
     while((nbytes = read(filedes, c, 1))<=0){}
     while(c[0] != ' ')
     {
@@ -517,7 +543,6 @@ int read_from_client (int filedes)
         }    
     }
     while((nbytes = read(filedes, c, 1))<=0){}
-    printf("EFTASA EDW (%s)\n", buffer);
     if(strcmp(buffer, "GET_FILE_LIST") == 0)
     {
         int counter;
@@ -533,9 +558,10 @@ int read_from_client (int filedes)
     }
     else if(strcmp(buffer, "GET_FILE") == 0)
     {
+      printf("%s ",buffer);
       char message[256];
       strcpy(buffer, "");
-      while((nbytes = read(filedes, c, 1)==0));
+      while((nbytes = read(filedes, c, 1)<=0));
       while(c[0] != ' ')
       {
           if (nbytes < 0)
@@ -551,53 +577,51 @@ int read_from_client (int filedes)
           {
               c[1]='\0';
               strcat(buffer, c);
-              while((nbytes = read(filedes, c, 1))==0);
+              while((nbytes = read(filedes, c, 1))<=0);
           }
 
       }
       
-      while((nbytes = read(filedes, c, 1)==0));
-      printf("EFTASA KAI EDW (%s)\n", buffer);
-
+      while((nbytes = read(filedes, c, 1)<=0));
 
       char path[256];
       strcpy(path, buffer);
       time_t version;
       while((nbytes = read(filedes,&version,sizeof(time_t)))<= 0){}
-      printf("TO PHRA TO GAMW VERSION (%ld)\n",version);
+      printf("%s %ld\n",path, version);      
       if(access(path, F_OK) == -1)
       {
         strcpy(buffer, "FILE_NOT_FOUND ");
-        while(nbytes = write(filedes, buffer, strlen(buffer) + 1) == 0){}
+        while(nbytes = write(filedes, buffer, strlen(buffer) + 1) <= 0){}
       }
       else
       {
         if(get_version(path) == version)
         {
           strcpy(buffer, "FILE_UP_TO_DATE ");
-          while(nbytes = write(filedes, buffer, strlen(buffer) + 1) == 0){}          
+          while(nbytes = write(filedes, buffer, strlen(buffer) + 1) <= 0){}          
         }
         else
         {
           strcpy(buffer, "FILE_SIZE ");
-          //sprintf(message,"FILE_SIZE ");
-          while(nbytes = write(filedes, buffer, strlen(buffer) + 1) == 0){} 
+          while(nbytes = write(filedes, buffer, strlen(buffer) + 1) <= 0){} 
+
+          /*Send version*/
           time_t version2 = get_version(path);
-          // memcpy(message + strlen("FILE_SIZE ") + 1,&version2, sizeof(time_t));
-          while(write(filedes, &version2, sizeof(time_t)) == 0){}
+          while(write(filedes, &version2, sizeof(time_t)) <= 0){}
+
+          /*Send size*/
           long int size = findSize(path);
-          // memcpy(message + strlen("FILE_SIZE ") + 1 + sizeof(time_t),&size,sizeof(long int));
-          while(nbytes = write(filedes, &size, sizeof(long int)) == 0){}
+          while(nbytes = write(filedes, &size, sizeof(long int)) <= 0){}
+
           int fd = open(path, O_RDONLY);
           strcpy(buffer, "");
           for(long int i = 0 ; i < size; i++)
           {
-            while((nbytes = read(fd, &c[0], 1) == 0)){}
-            //memcpy(message + i,&c[0],1);
-            while(nbytes = write(filedes, buffer + i, 1) == 0){}
+            while((nbytes = read(fd, &c[0], 1) <= 0)){}
+            while(nbytes = write(filedes, buffer + i, 1) <= 0){}
 
           }
-          //write(filedes, message, strlen("FILE_SIZE ") + sizeof(time_t) + sizeof(long int) + size + 1);
           close(fd);
         }
         
@@ -649,8 +673,8 @@ int main (int argc, char *argv[])
 
   handler();
   /* Create the socket. */
-  sock = socket (PF_INET, SOCK_STREAM, 0);
-  if (sock < 0)
+  server_sock = socket (PF_INET, SOCK_STREAM, 0);
+  if (server_sock < 0)
   {
     perror ("socket (client)");
     exit (EXIT_FAILURE);
@@ -658,7 +682,7 @@ int main (int argc, char *argv[])
 
   /* Connect to the server. */
   init_sockaddr (&servername, SERVERHOST, PORT);
-  if (0 > connect (sock,
+  if (0 > connect (server_sock,
                    (struct sockaddr *) &servername,
                    sizeof (servername)))
   {
@@ -707,9 +731,9 @@ int main (int argc, char *argv[])
   /* Send data to the server. */
   char msg[20];
   strcpy(msg, "LOG_ON ");
-  write_to_server (sock,msg);
+  write_to_server (server_sock,msg);
   strcpy(msg, "GET_CLIENTS ");
-  write_to_server (sock,msg);
+  write_to_server (server_sock,msg);
   
   initialize(&pool);
   pthread_mutex_init(&list_mtx, 0);
@@ -717,25 +741,19 @@ int main (int argc, char *argv[])
   pthread_cond_init(&cond_nonempty, 0);
   pthread_cond_init(&cond_nonfull, 0);
   
-  read_from_server(sock, myIP);
+  read_from_server(server_sock, myIP);
   fill_pool(start_client_list);
   pthread_t cons, prod;
 
   
   for(int i = 0 ; i < workerThreads; i++)
     pthread_create(&threads[i], NULL, worker_Thread, NULL);
-  // while(1)
-  // {
-  //   read_from_server(sock, myIP);
-  // }
 
 
-
-  
 
   /* Initialize the set of active sockets. */
   FD_ZERO (&active_fd_set);
-  FD_SET (sock, &active_fd_set);
+  FD_SET (server_sock, &active_fd_set);
   FD_SET (listeningSock, &active_fd_set);
 
   while (1)
@@ -772,7 +790,7 @@ int main (int argc, char *argv[])
                         ntohs (listeningClient.sin_port));
                 FD_SET (new, &active_fd_set);
             }
-            else if(i == sock)
+            else if(i == server_sock)
             {
                 /* Data arriving on an already-connected socket. */
                 if ( read_from_server (i, myIP) < 0)

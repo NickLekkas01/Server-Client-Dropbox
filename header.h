@@ -7,7 +7,7 @@ typedef struct client_data
 
 uint32_t myIP;
 uint32_t client_port;
-int sock;
+int server_sock;
 int listeningSock;
 
 int POOL_SIZE;

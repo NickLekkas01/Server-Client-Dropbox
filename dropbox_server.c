@@ -11,7 +11,7 @@
 #include "header.h"
 
 
-#define PORT    5555
+// #define PORT    5555
 #define MAXMSG  512
 
 
@@ -32,12 +32,11 @@ void init_sockaddr_by_IP (struct sockaddr_in *name,
 
 int make_socket (uint16_t port)
 {
-    int sock;
     struct sockaddr_in name;
 
     /* Create the socket. */
-    sock = socket (PF_INET, SOCK_STREAM, 0);
-    if (sock < 0)
+    server_sock = socket (PF_INET, SOCK_STREAM, 0);
+    if (server_sock < 0)
     {
         perror ("socket");
         exit (EXIT_FAILURE);
@@ -47,13 +46,13 @@ int make_socket (uint16_t port)
     name.sin_family = AF_INET;
     name.sin_port = htons (port);
     name.sin_addr.s_addr = htonl (INADDR_ANY);
-    if (bind (sock, (struct sockaddr *) &name, sizeof (name)) < 0)
+    if (bind (server_sock, (struct sockaddr *) &name, sizeof (name)) < 0)
     {
       perror ("bind");
       exit (EXIT_FAILURE);
     }
 
-  return sock;
+  return server_sock;
 }
 
 
@@ -61,7 +60,6 @@ int send_to_clients(uint32_t IP, uint32_t port, char *msg)
 {
     Client_data *temp = start_server_list;
     int nbytes;
-    int sock;
     struct sockaddr_in clientname;
     while(temp != NULL)
     {
@@ -71,6 +69,7 @@ int send_to_clients(uint32_t IP, uint32_t port, char *msg)
         uint32_t temp1, temp2;
         if(temp->data->sin_addr.s_addr != IP && temp->data->sin_port != port)
         {
+            /*Send USER_ON OR USER_OFF*/
             while((nbytes = write (temp->filedesc, msg, strlen (msg) + 1))<=0){}
             if (nbytes < 0)
             {
@@ -78,6 +77,7 @@ int send_to_clients(uint32_t IP, uint32_t port, char *msg)
                 exit (EXIT_FAILURE);
             }
             temp1 = ntohl(IP);
+            /*Send IP*/
             while((nbytes = write(temp->filedesc, &temp1, sizeof(uint32_t))<=0)){}
             if (nbytes < 0)
             {
@@ -85,6 +85,7 @@ int send_to_clients(uint32_t IP, uint32_t port, char *msg)
                 exit (EXIT_FAILURE);
             }
             temp2 = ntohl(port);
+            /*Send port*/
             while((nbytes = write(temp->filedesc, &temp2, sizeof(uint32_t))<=0)){}
             if (nbytes < 0)
             {
@@ -97,7 +98,7 @@ int send_to_clients(uint32_t IP, uint32_t port, char *msg)
 }
 
 
-int read_from_client (int filedes, struct sockaddr_in clientname, int sock)
+int read_from_client (int filedes, struct sockaddr_in clientname, int server_sock)
 {
     char buffer[MAXMSG];
     strcpy(buffer, "");
@@ -229,16 +230,16 @@ int main(int argc, char *argv[])
         printf("Not enough arguments\n");
     }
     extern int make_socket (uint16_t port);
-    int sock;
+    //int server_sock;
     fd_set active_fd_set, read_fd_set;
     int i;
     struct sockaddr_in clientname;
     size_t size;
     int reuse_addr=1;
-    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse_addr, sizeof(reuse_addr));
+    setsockopt(server_sock, SOL_SOCKET, SO_REUSEADDR, &reuse_addr, sizeof(reuse_addr));
     /* Create the socket and set it up to accept connections. */
-    sock = make_socket (portNum);
-    if (listen (sock, 1) < 0)
+    server_sock = make_socket (portNum);
+    if (listen (server_sock, 1) < 0)
         {
         perror ("listen");
         exit (EXIT_FAILURE);
@@ -247,7 +248,7 @@ int main(int argc, char *argv[])
     
     /* Initialize the set of active sockets. */
     FD_ZERO (&active_fd_set);
-    FD_SET (sock, &active_fd_set);
+    FD_SET (server_sock, &active_fd_set);
     
 
     while (1)
@@ -266,12 +267,12 @@ int main(int argc, char *argv[])
         {
             if (FD_ISSET (i, &read_fd_set))
             {
-                if (i == sock)
+                if (i == server_sock)
                 {
                     /* Connection request on original socket. */
                     int new;
                     size = sizeof (clientname);
-                    new = accept (sock,
+                    new = accept (server_sock,
                                 (struct sockaddr *) &clientname,
                                 (socklen_t *)&size);
                     if (new < 0)
@@ -288,7 +289,7 @@ int main(int argc, char *argv[])
                 else
                 {
                     /* Data arriving on an already-connected socket. */
-                    if (read_from_client (i, clientname, sock) < 0)
+                    if (read_from_client (i, clientname, server_sock) < 0)
                     {
                         close (i);
                         FD_CLR (i, &active_fd_set);

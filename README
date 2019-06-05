@@ -1,0 +1,22 @@
+ sdi1600089
+ Lekkas Nikolaos
+ 
+ Project 3 
+ 
+ Compile:
+ make all
+ 
+ Run:
+ ./server -p 5555
+ ./client -d directory -p 6666 -w 10 -b 6 -sp 5555 -sip linux21.di.uoa.gr
+ ./client -d directory -p 7777 -w 10 -b 6 -sp 5555 -sip linux21.di.uoa.gr
+ ./client -d directory -p 8888 -w 10 -b 6 -sp 5555 -sip linux21.di.uoa.gr
+ 
+ SERVER
+ 
+ For the server side we needed to create a socket to listen for requests for connections. Also we needed the command select to manage these requests. Any connecting client could send messages to the server. One type of message he could send was LOG_ON address, portNumber where address is his IP address and portNumber the port he is going to use to connect to the server. When a server received this message he would insert this client and his data to list list of clients. Also he would inform other connected clints about the connection of our current client. Another message server can take is GET_CLIENTS in which he send all the already connected clients to the client who connected right now. The last message a server can get is LOG_OFF in which the client is telling the server that he is leaving and so he should remove him from his clients list.
+ 
+ CLIENT
+ 
+ The client is going to connect to the server so that he can share his appearance, his data and acquire the data of the rest connected clients. The clients will have their own lists including the data of the other clients. Clients can also communicate with other clients. A client can send a GET_FILE_LIST message in which he will ask for the number of files the other client has and nextly the name of these files with their version. The transfer is being made with the use of the worker_threads and also the cyclic-buffer. Also a client can send a GET_FILE pathname, version message in which he can ask to receive a file in the path pathname. He also send the version so that he can check if he has the latest version. If not he will receive the newer one. Lastly the client can send a log_off message by Ctrl+C(SIGINT) to inform the server and the other clients that he is leaving and they should erase him from their lists. So the clients are in the position of both hearing the other clients and also sending their files, if asked, to other clients.
+ The server is playing the part of a synchorizer for the clients, giving them the identities(ip, port) of the other clients.
