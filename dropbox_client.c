@@ -92,23 +92,26 @@ void ask_file_list(int sock,struct in_addr* address,uint32_t port)
   }
 }
 
-void ask_file(int sock,char *path,time_t version, struct in_addr* address,uint32_t port)
+void ask_file(int sock,char *path,time_t version)
 {
   char message[256];
   int bytes;
   int files;
   strcpy(message,"GET_FILE ");
-  while ((write(sock,message,strlen("GET_FILE ")+1))==0);
+  while ((bytes = write(sock,message,strlen("GET_FILE ")+1)) == 0 ){}
   char temp_path[256];
 
   strcpy(temp_path, path);
   strcat(temp_path, " ");
-  while((write(sock, temp_path, strlen(temp_path) + 1))==0);
-  while((bytes = write(sock, &version, sizeof(time_t))) == 0);
+  while((bytes = write(sock, temp_path, strlen(temp_path) + 1)) == 0){}
+  while((bytes = write(sock, &version, sizeof(time_t))) == 0){}
+  printf("SKATA\n");
   char buffer[256];
   char c[2];
   strcpy(buffer, "");
-  while((bytes = read(sock, c, 1))==0);
+  printf("SKATA2\n");
+  while((bytes = read(sock, c, 1)) <= 0);
+  printf("SKATA3\n");
 
   while(c[0] != ' ')
   {
@@ -125,12 +128,11 @@ void ask_file(int sock,char *path,time_t version, struct in_addr* address,uint32
       {
           c[1]='\0';
           strcat(buffer, c);
-          while((bytes = read(sock, c, 1))==0);
+          while((bytes = read(sock, c, 1)) <= 0);
       }    
 
   }
-
-  while((bytes = read(sock, c, 1))==0);
+  while((bytes = read(sock, c, 1))<=0);
   if (bytes < 0)
   {
     perror ("read");
@@ -146,7 +148,7 @@ void ask_file(int sock,char *path,time_t version, struct in_addr* address,uint32
     while((bytes = read(sock, &version2, sizeof(time_t)) == 0)){}
     long int size;
     while((bytes = read(sock, &size, sizeof(long int)) == 0)){}
-    //printf("%ld - %ld\n",version2, size);
+    printf("%ld - %ld\n",version2, size);
     if(access(path, F_OK) != -1)
     {
       remove(path);
@@ -160,22 +162,6 @@ void ask_file(int sock,char *path,time_t version, struct in_addr* address,uint32
     }
     close(fd);
   }
-  
-
-  // while((bytes = read(sock,message,strlen("FILE ") + 1 + sizeof(int)))<= 0){}
-  // memcpy(&files,message+strlen("FILE_LIST ") + 1,sizeof(int) );
-  // printf("%s: %d\n",message,files);
-
-  // while(files > 0 )
-  // {
-  //   while(read(sock,message,128 +sizeof(uint64_t))<= 0){}
-  //   memcpy(&version,message+128,sizeof(uint64_t));
-  //   printf("RECEIVER: %s - %ld\n",message, version); 
-  //   place(&pool,address->s_addr,port,version,message);
-  //   pthread_cond_signal(&cond_nonempty);
-    
-  //   files--;
-  // }
 }
 
 void* worker_Thread(void* ptr) 
@@ -216,11 +202,10 @@ void* worker_Thread(void* ptr)
         exit (EXIT_FAILURE);
       }
       ask_file_list(client_sock,&a,data->port);
-
     }
     else
     {
-      ask_file(client_sock, data->path, data->version, &a,data->port);
+      ask_file(client_sock, data->path, data->version);
     }
     
 
@@ -312,7 +297,7 @@ void handler (void)
 
 int read_from_server(int filedes, uint32_t myIP)
 {
-  char buffer[50];
+  char buffer[256];
   int nbytes;
   char c[2];
   strcpy(buffer, "");
@@ -348,6 +333,8 @@ int read_from_server(int filedes, uint32_t myIP)
   strcpy(myIPbuffer,inet_ntoa(b));
   if(strcmp(buffer, "CLIENT_LIST") == 0)
   {
+    strcpy(buffer, "");
+
     int N;
     while((nbytes = read(filedes, &N, sizeof(N)))<= 0 ){}
     if (nbytes < 0)
@@ -387,7 +374,7 @@ int read_from_server(int filedes, uint32_t myIP)
     }
     printf("Client List\n");
   }
-  else
+  else if(strcmp(buffer,"USER_ON") == 0 || strcmp(buffer,"USER_OFF") == 0)
   {
     while((nbytes = read(filedes, &IP, sizeof(IP))<=0));
     if (nbytes < 0)
@@ -428,6 +415,8 @@ int read_from_server(int filedes, uint32_t myIP)
       }
       pthread_mutex_unlock(&list_mtx);
     }
+    strcpy(buffer, "");
+    
   }
   Print_List(start_client_list); 
 
@@ -508,7 +497,7 @@ int read_from_client (int filedes)
     strcpy(buffer, "");
     int nbytes;
     char c[2];
-    while((nbytes = read(filedes, c, 1))==0){}
+    while((nbytes = read(filedes, c, 1))<=0){}
     while(c[0] != ' ')
     {
         if (nbytes < 0)
@@ -524,10 +513,11 @@ int read_from_client (int filedes)
         {
             c[1]='\0';
             strcat(buffer, c);
-            while((nbytes = read(filedes, c, 1))==0);
+            while((nbytes = read(filedes, c, 1))<=0);
         }    
     }
-    while((nbytes = read(filedes, c, 1))==0){}
+    while((nbytes = read(filedes, c, 1))<=0){}
+    printf("EFTASA EDW (%s)\n", buffer);
     if(strcmp(buffer, "GET_FILE_LIST") == 0)
     {
         int counter;
@@ -554,51 +544,57 @@ int read_from_client (int filedes)
               perror ("read");
               exit (EXIT_FAILURE);
           }
-          else if (nbytes == 0)
-              /* End-of-file. */
-              return -1;
+          // else if (nbytes == 0)
+          //     /* End-of-file. */
+          //     return -1;
           else
           {
               c[1]='\0';
               strcat(buffer, c);
               while((nbytes = read(filedes, c, 1))==0);
-          }    
+          }
+
       }
+      
       while((nbytes = read(filedes, c, 1)==0));
+      printf("EFTASA KAI EDW (%s)\n", buffer);
+
 
       char path[256];
       strcpy(path, buffer);
       time_t version;
       while((nbytes = read(filedes,&version,sizeof(time_t)))<= 0){}
+      printf("TO PHRA TO GAMW VERSION (%ld)\n",version);
       if(access(path, F_OK) == -1)
       {
         strcpy(buffer, "FILE_NOT_FOUND ");
-        write(filedes, buffer, strlen(buffer) + 1);
+        while(nbytes = write(filedes, buffer, strlen(buffer) + 1) == 0){}
       }
       else
       {
         if(get_version(path) == version)
         {
           strcpy(buffer, "FILE_UP_TO_DATE ");
-          write(filedes, buffer, strlen(buffer) + 1);          
+          while(nbytes = write(filedes, buffer, strlen(buffer) + 1) == 0){}          
         }
         else
         {
-          sprintf(message,"FILE_SIZE ");
-          write(filedes, message, strlen(message) + 1); 
+          strcpy(buffer, "FILE_SIZE ");
+          //sprintf(message,"FILE_SIZE ");
+          while(nbytes = write(filedes, buffer, strlen(buffer) + 1) == 0){} 
           time_t version2 = get_version(path);
           // memcpy(message + strlen("FILE_SIZE ") + 1,&version2, sizeof(time_t));
-          write(filedes, &version2, sizeof(time_t));
+          while(write(filedes, &version2, sizeof(time_t)) == 0){}
           long int size = findSize(path);
           // memcpy(message + strlen("FILE_SIZE ") + 1 + sizeof(time_t),&size,sizeof(long int));
-          write(filedes, &size, sizeof(long int));
+          while(nbytes = write(filedes, &size, sizeof(long int)) == 0){}
           int fd = open(path, O_RDONLY);
-          strcpy(message, "");
+          strcpy(buffer, "");
           for(long int i = 0 ; i < size; i++)
           {
             while((nbytes = read(fd, &c[0], 1) == 0)){}
             //memcpy(message + i,&c[0],1);
-            write(filedes, message + i, 1);
+            while(nbytes = write(filedes, buffer + i, 1) == 0){}
 
           }
           //write(filedes, message, strlen("FILE_SIZE ") + sizeof(time_t) + sizeof(long int) + size + 1);
@@ -606,6 +602,7 @@ int read_from_client (int filedes)
         }
         
       }
+      strcpy(buffer, "");
        
     }
 
@@ -770,7 +767,7 @@ int main (int argc, char *argv[])
                     exit (EXIT_FAILURE);
                 }
                 fprintf (stderr,
-                        "Server: connect from host %s, port %hd.\n",
+                        "Client: connect from host %s, port %hd.\n",
                         inet_ntoa (listeningClient.sin_addr),
                         ntohs (listeningClient.sin_port));
                 FD_SET (new, &active_fd_set);

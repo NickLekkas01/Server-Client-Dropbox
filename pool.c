@@ -49,7 +49,7 @@ Pool_data *obtain(pool_t * pool)
   pthread_mutex_lock(&pool_mtx);
   while (pool->count <= 0) 
   {
-    printf(">> Found Buffer Empty \n");
+    //printf(">> Found Buffer Empty \n");
     pthread_cond_wait(&cond_nonempty, &pool_mtx);
   }
   data->IP = pool->data[pool->start].IP;
